@@ -6,29 +6,35 @@ Copyright Kamil Pawlowski 2018
 
 Application of policies to traffic.
 
+COMMENT: Answer mode sounds like you're saying that padme doesn't rely on other policy engines to make decisions.  Is that right?  I thought Padme was focused on management of policy engines and would never include its own policy engine.
+
 The Enforcer supports several modes of operation.
 * Answer mode - In this mode it responds to queries directly.
 * Plugin mode - In this mode it configures other components to enforce policies
 on its behalf.
 
-An Enforcer may operate in both modes simultaneously depending on upon the 
+COMMENT: The APIs below reflect 2 different interfaces: from the client needing a policy decision (Answer functions) to Padme.   And from Padme to the policy-engines that actually make the decision.  If you're not building a policy engine as part of padme, I'd recommend describing the APIs as above.  (I'd rewrite this myself, but I don't know what your intent actually is.)
+
+
+An Enforcer may operate in both modes simultaneously depending on upon the
 policy configuration.
 
-In answer mode the Enforcer is queried as to whether or not some specific piece 
-of traffic is acceptable under the policies known by the enforcer. For example 
+In answer mode the Enforcer is queried as to whether or not some specific piece
+of traffic is acceptable under the policies known by the enforcer. For example
 it may plug into envoy to make decision as to whether or not some specific web
 service request is permissible.
 
 In Plugin mode the Enforcer uses plugins to configure external components that
 enforce policies.  For example an enforcer may delegate packet level enforcement
 to IP Chains, or Authorization of Kubernetes requests to OPA. In Plugin mode
-policies must still have fields that they apply to filled in so that 
-testing of policies off line can occur, and so that policies remain 
+policies must still have fields that they apply to filled in so that
+testing of policies off line can occur, and so that policies remain
 intelligible.
 
 # APIS #
 
-The Enforcer supports the following APIS: 
+The Enforcer supports the following APIS:
+
 * Packet Level Answer API
 * Request Level Answer API
 * Plugin API
@@ -37,44 +43,46 @@ The Enforcer supports the following APIS:
 ![Enforcer Diagram](Enforcer_Diagram.png)
 
 The first two are used to implement Answer Mode. The third is used to implement
-Plugin Mode. The last of these is used as the interface between the PADME 
+Plugin Mode. The last of these is used as the interface between the PADME
 Controller.  All four APIs are described in this document.
 
 It is expected that an Enforcer may be implemented in or out of process. The
 APIs defined here are defined in-process using golang syntax. Conversion
 to HTTP end points is done by turning the request into a JSON serialized post.
-HTTP Callbacks for the Controller API are not yet defined.  The APIs may 
-support a request id scheme, where the caller asserts a numerical ID 
+HTTP Callbacks for the Controller API are not yet defined.  The APIs may
+support a request id scheme, where the caller asserts a numerical ID
 for a given request and the response to that request is passed with
 the same ID to allow for faster responses.
 
-Finally, and with a touch of irony, authorization of callers to any of the 
+Finally, and with a touch of irony, authorization of callers to any of the
 Enforcer APIs is still TBD.  For example how Controllers and Enforcers will
-authorize each other is still TDB. It should be assumed however that these 
-kinds of operations will go over SSL. 
+authorize each other is still TDB. It should be assumed however that these
+kinds of operations will go over SSL.
 
 ## Packet Level Answer API ##
 The Packet Level Answer API supports infrequent low level look ups such as
-those that might be found in software defined networking. 
+those that might be found in software defined networking.
 
     //
     // Answer inspects a packet, extracts any protocol information that it can
     // from the packet, and matches it against policies known by the enforcer.
-    // 
+    //
     // true is returned if policies allow this traffic.
     // false is returned if policies do not allow this traffic, or if
     // the packet was not understood.
     //
     func Answer(packet byte[]) (bool)
 
+COMMENT: Credentials aren't necessary here, but they are in the Request-level API?
+
 ## Request Level Answer API ##
-The Request Level Answer API supports most normal services requests. For 
+The Request Level Answer API supports most normal services requests. For
 example a web services request for a specific target URL uses this call.
 
     //
     // Answer matches a request described by properties and credential
     // against the rules known by this enforcer.
-    // 
+    //
     // properties are the intrinsic properties of a given request. For
     // example the source tcp port or the destination ip address, or the
     // target URI. These are composed (along with the credential)
@@ -87,15 +95,24 @@ example a web services request for a specific target URL uses this call.
     // No wild carding is permitted in a request.
     //
     // true is returned if policies allow this request.
-    // false is returned if policies do not allow this request. 
+    // false is returned if policies do not allow this request.
     //
     func Answer(properties []*policy.Rule, credential *policy.Credential) (bool)
+
+COMMENT: If the return value is always a boolean, that means PADME is focused on only true/false decisions.  So no way to handle a rate-limit policy.  Correct?
+
+COMMENT: It's surprising that the input into the policy decision is a collection of Rules.  Why would the caller need to do anything other than provide the data?  Or is Padme supposed to understand the semantics of that data?
+
+COMMENT: If Padme understands the semantics of the data, is it choosing which plugin(s) to ask for a decision, or is it doing something else clever because it understands the data?
+
+COMMENT: If Padme doesn't understand the semantics, why not use []bytes, JSON, protobuf or something that is well-understood as a way of sending data to another system?  All the examples below use JSON.
+
 
 ## Plugin API ##
 The Plugin API is used to configure sub-components that enforce policies on
 behalf of the Enforcer.
 
-    // The Plugin interface is implemented by or on behalf of an external 
+    // The Plugin interface is implemented by or on behalf of an external
     // Policy enforcement component. There can only be one
     // plugin with a given id on any given enforcer, and this id must
     // be consistent throughout the zone.
@@ -104,10 +121,10 @@ behalf of the Enforcer.
     // to configure the specified plugin.
     //
     // As there is no guarantee that the sub-component understands time.
-    // A policy is not applied to the plugin until the start time in 
-    // its Duration field. It is unapplied at the end time.  This 
+    // A policy is not applied to the plugin until the start time in
+    // its Duration field. It is unapplied at the end time.  This
     // must be taken into account when testing policies.
-    // 
+    //
     // Registered, Unregistered, Enabled, Disabled.
     //
     // Plugins register themselves with the enforcer when they
@@ -122,7 +139,7 @@ behalf of the Enforcer.
         // unique id of this plugin in the zone
         PluginID string
 
-        // apply the policy information provided by a policy 
+        // apply the policy information provided by a policy
         //
         // Parameters:
         // id - an identified asserted by the enforcer through which
@@ -132,9 +149,14 @@ behalf of the Enforcer.
         // return (bool, error)
         //   true - the policy was applied
         //   false - the policy was not applied
-        //   string - a human readable error returned by the plugin. valid 
+        //   string - a human readable error returned by the plugin. valid
         //     if false is returned.
         Apply(id int, data []byte) (bool, string)
+
+COMMENT: I was confused by the name "Apply".  The goal seems to be upsert.
+
+COMMENT: Every policy is named by an integer?  As written, the caller has to keep track of which integers have already been used and create a new one as required.  Since the policy name isn't for consumption by humans, I'd expect the ID to be generated by the system during creation, and then provided by the client on update.  Of course, that would mean splitting Apply into Create/Update.  I expect there's a Read call too.
+
 
         // remove a policy that was previously applied
         //
@@ -147,17 +169,21 @@ behalf of the Enforcer.
         //   string - a human readable error returned by the plugin. valid
         //     if false is returned.
         Remove(id int) (bool, string)
+
+COMMENT: There must be an Answer() API here somewhere?  Is it the same as the one above?
+
     }
 
-    // register the specified plugin with the enforcer.  Only one 
+
+    // register the specified plugin with the enforcer.  Only one
     // plugin with a specified id may be registered with an enforcer
     // at a time. If a plugin could not be registered it should
     // not attempt enforcement actions.
     //
     // Upon registration of a new plugin, assuming the plugin
-    // is enabled, all policies are evaluated and any that control 
+    // is enabled, all policies are evaluated and any that control
     // this plugin apply themselves to this plugin.
-    // 
+    //
     // Parameters:
     // plugin - the plugin object used to control this plugin
     //
@@ -168,11 +194,11 @@ behalf of the Enforcer.
     func Register(plugin *Plugin) (bool)
 
     // remove a plugin from the enforcer. When this occurs
-    // all applied policies are removed. 
+    // all applied policies are removed.
     //
     // Parameters:
     // plugin - the plugin object used to control this plugin
-    // 
+    //
     // return:
     //   true - the plugin was successfully unregistered
     //   false - the plugin was not successfully unregistered.
@@ -195,7 +221,7 @@ used between the Enforcer and Controller.
         PLUGIN_APPLY PolicyEvent = 0
         // an attempt to apply a policy failed
         PLUGIN_APPLY_ERROR PolicyEvent = 1
-        // a policy was removed, for example if a plugin was removed or 
+        // a policy was removed, for example if a plugin was removed or
         // the end time of a policy passed.
         PLUGIN_REMOVE PolicyEvent = 2
         // an attempt was made to remove a policy, however
@@ -211,8 +237,8 @@ used between the Enforcer and Controller.
         //
         // This is called when an event occurs on a policy
         // the version and description of the policy are passed to
-        // the controller.  An optional notes field 
-        // is used to carry the error string in the event of 
+        // the controller.  An optional notes field
+        // is used to carry the error string in the event of
         // a PLUGIN_APPLY_ERROR or PLUGIN_REMOVE_ERROR
         //
         // Parameters:
@@ -220,12 +246,12 @@ used between the Enforcer and Controller.
         //   policyVersion - the version of the policy that was effected
         //   policyDescription - the description of the policy that was effected
         //   notes - an error description or empty
-        Handle(event PolicyEvent, policyVersion uint64, policyDescription string, notes string) 
+        Handle(event PolicyEvent, policyVersion uint64, policyDescription string, notes string)
     }
 
     //
     // register a controller with this enforcer for notifications of events
-    // 
+    //
     // The controller must specify an id by which it will be known to this enforcer.
     // this id must be unique among controllers.
     //
@@ -233,15 +259,15 @@ used between the Enforcer and Controller.
     //  id - the controller id
     //  handler - the handler which is to be called when an event occurs.
     //
-    // Return 
+    // Return
     //   true - registration succeeded
     //   false - registration failed
     //
     Register(id int, handler *PolicyEventHandler) (bool)
-    
+
     //
     // remove the registration of a controller with this enforcer.
-    // unlike plugins the unregistration of a control does not 
+    // unlike plugins the unregistration of a control does not
     // effect the state of policies installed on this enforcer.
     // Simply, events that might have been reported to unregistered
     // controller are simply lost.
@@ -254,20 +280,22 @@ used between the Enforcer and Controller.
     //
     // Apply a policy bundle to the enforcer.
     //
-    // Policies are specifically ordered.  Thus the addition, removal, or 
-    // modification of one or more policy requires a new policy bundle to 
-    // be applied to the enforcer. The enforcer is responsible for 
-    // determining which policies have been added or removed and 
+    // Policies are specifically ordered.  Thus the addition, removal, or
+    // modification of one or more policy requires a new policy bundle to
+    // be applied to the enforcer. The enforcer is responsible for
+    // determining which policies have been added or removed and
     // modifying its state or the state of its plugins as necessary.
-    // If no PolicyVersions change, and no policies are added 
+    // If no PolicyVersions change, and no policies are added
     // or removed, then nothing is done.
     //
+
+COMMENT: Not every system uses ordered policies.  No need to motivate policy bundles by ordering.
     // A return code is provided, however failures for individual policies
     // are returned via the PolicyEventHandler.
     //
     // Rollback is achieved by shipping an old policy bundle with higher
     // version numbers.
-    // 
+    //
     // Parameters:
     //  bundle - the policy bundle to apply
     //
@@ -288,7 +316,7 @@ used between the Enforcer and Controller.
     //
     func Plugins() ([]string)
 
-    // Explicitly enable a particular plugin.  
+    // Explicitly enable a particular plugin.
     //
     // If the plugin is already registered then this causes
     // it to become enabled and causes all policies that
@@ -296,7 +324,7 @@ used between the Enforcer and Controller.
     // not registered then when it registers it automatically
     // becomes enabled.
     //
-    // Specific errors encountered during the application of 
+    // Specific errors encountered during the application of
     // policies are returned via the PolicyEventHandler
     //
     // Parameters:
@@ -315,16 +343,16 @@ used between the Enforcer and Controller.
     // is remembered and it must be explicitly enabled
     // before operating again.
     //
-    // Specific errors encountered during the removal of 
+    // Specific errors encountered during the removal of
     // policies are returned via the PolicyEventHandler
     //
-    // Specific errors encountered during the application of 
+    // Specific errors encountered during the application of
     // policies are returned via the PolicyEventHandler
     // Parameters:
     //  pluginID - the id of the specific plugin
     //
     // Returns:
-    //   true - the plugin was disabled 
+    //   true - the plugin was disabled
     //   false - the plugin could not be disabled
     //
     func Disable(pluginID string) (bool)
@@ -332,14 +360,14 @@ used between the Enforcer and Controller.
 # Examples, API Implementations, and Mappings #
 In this section a number of possible integrations are postulated and
 described. First an idealized web hooks is presented, then integrations
-for [kubernetes](https://kubernetes.io/) and [SPIFFE](https://spiffe.io/) 
+for [kubernetes](https://kubernetes.io/) and [SPIFFE](https://spiffe.io/)
 are proposed.
 
 ## Generic Webhook API ##
 The intent of PADME is to provide a generalized authorization mechanism. As such
-PADME exposes it policy decision engine in terms of the Answer and Plugin APIs. 
+PADME exposes it policy decision engine in terms of the Answer and Plugin APIs.
 However this interface is not implemented by most systems. The general industry
-direction is to provide a Webhook for external authentication.  In the case 
+direction is to provide a Webhook for external authentication.  In the case
 of Kubernetes, the SubjectAccessReview Webhook can be adapted to PADME's needs
 as described elsewhere in this document.  However PADME has an opinion about
 the kind of data that it would prefer to receive from such a callback.
@@ -375,27 +403,27 @@ web service requests.
         }
     }
 
-This scheme gives PADME the ability to make decisions about a wide range of 
-factors related to this request.  The ns field and the http.headers fields are 
+This scheme gives PADME the ability to make decisions about a wide range of
+factors related to this request.  The ns field and the http.headers fields are
 optional.  Providing the Answer API the remaining http headers allows
 the transparent construction of more sophisticated behaviors without
-expanding the Webhook interface. (A change that would likely have to 
-occur in many places). 
+expanding the Webhook interface. (A change that would likely have to
+occur in many places).
 
-A future extension might be to add a field for the certificate used to secure 
-the connection. 
+A future extension might be to add a field for the certificate used to secure
+the connection.
 
-Support for QUIC over UDP replaces the tcp section with an equivalent "udp" 
+Support for QUIC over UDP replaces the tcp section with an equivalent "udp"
 section.
 
 Translation of these fields into PADME rule patterns generates a name=value
 element. In PADME rule terms, the Layer for ip, tcp, udp and ns is network.
 The Layer for http is Transport. (The precise names of layers may change as
-the proposal is considered further, and yes Transport has a known existing 
-meaning in the networking space).  
+the proposal is considered further, and yes Transport has a known existing
+meaning in the networking space).
 
 Version does not presently have
-an administrative space assigned for it in the Enforcement Surface Onion 
+an administrative space assigned for it in the Enforcement Surface Onion
 (ESO).
 
 The LType is the respective, ip, tcp, udp, ns or http. Headers are named:
@@ -420,8 +448,8 @@ or
     }
 
 ## kubernetes ##
-PADME is able to interact with both Kubernetes authorizers and admission 
-controllers. 
+PADME is able to interact with both Kubernetes authorizers and admission
+controllers.
 
 ### Authorizers ###
 Kubernetes supports four different authorization modes:
@@ -432,37 +460,37 @@ approaches are suggested.
 
 #### Node ####
 [Node](https://kubernetes.io/docs/admin/authorization/node/) is used
-only for kubelets. Its configuration can change if RBAC is also 
-configured.  Otherwise a kubelet must have a credential that specifies 
-the system:nodes group and a username of system:node:<nodeName>.  As 
-such it is omitted further in this discussion, and should be only configured 
+only for kubelets. Its configuration can change if RBAC is also
+configured.  Otherwise a kubelet must have a credential that specifies
+the system:nodes group and a username of system:node:<nodeName>.  As
+such it is omitted further in this discussion, and should be only configured
 if RBAC is used.
 
 #### ABAC ####
-[ABAC](https://kubernetes.io/docs/admin/authorization/abac/) is configured 
-via a configuration file.  To reload this file the API server must be 
+[ABAC](https://kubernetes.io/docs/admin/authorization/abac/) is configured
+via a configuration file.  To reload this file the API server must be
 restarted.  As such this mode fits into PADME's plugin mode of control.
 Any policy to configure this infrastructure requires a translation
 into PADME Rules/RuleSets so that the policy can be reasoned about
-effectively. (This translation is done using the Webhook 
+effectively. (This translation is done using the Webhook
 structures described below). However, the specific policy contents to be written
-to the ABAC file are carried in the policy contents.  One PADME policy 
-per ABAC policy line is recommended.  
+to the ABAC file are carried in the policy contents.  One PADME policy
+per ABAC policy line is recommended.
 
 #### RBAC ####
 [RBAC](https://kubernetes.io/docs/admin/authorization/rbac/) is configured
-using kubctl or API calls.  While it is possible to convert users and 
+using kubctl or API calls.  While it is possible to convert users and
 roles/ClusterRoles to PADME policies, user groups are created and managed
 as part of the kubernetes [authentication](https://kubernetes.io/docs/admin/authentication/)
-process. Thus they are not visible to PADME. As such PADME can act 
+process. Thus they are not visible to PADME. As such PADME can act
 as distribution system and should use plugin mode.  To reason about policies
 a request can be thought of a combination of:
     user verb resource
-Policies can then be created the flatten user/group role bindings into 
+Policies can then be created the flatten user/group role bindings into
 matching policies. These can the be used to try new policies for testing.
 
 #### Webhook ####
-The kubernetes [Subject Access Review API Web Hook](https://kubernetes.io/docs/admin/authorization/webhook/) 
+The kubernetes [Subject Access Review API Web Hook](https://kubernetes.io/docs/admin/authorization/webhook/)
 creates requests that look like this:
 
     {
@@ -483,10 +511,10 @@ creates requests that look like this:
         }
     }
 
-This can be translated into an answer query that (in JSON) might look like the 
-following. Note that the Pattern field contents are different for each 
-Rule Layer/LType combination. Further the Credential field also continues to 
-need further elaboration, as we have not yet solidified our RBAC to policy 
+This can be translated into an answer query that (in JSON) might look like the
+following. Note that the Pattern field contents are different for each
+Rule Layer/LType combination. Further the Credential field also continues to
+need further elaboration, as we have not yet solidified our RBAC to policy
 mapping. A possible example of the use of that fields is provided here:
 
     {
@@ -507,16 +535,16 @@ in [K8s ABAC](https://kubernetes.io/docs/admin/authorization/).
 
 The omission from the Webhook API is any mechanism by which a user is
 authenticated. In an ideal world some user credential would be provided.
-(even thought authentication has already been done by kubernetes when 
+(even thought authentication has already been done by kubernetes when
 authorization is invoked).
 
 ### Admission Controllers ###
 PADME can also interact with
-[admission controller webhooks](https://kubernetes.io/docs/admin/admission-controllers/). 
-Specially, validating admission controllers. At time of writing the 
+[admission controller webhooks](https://kubernetes.io/docs/admin/admission-controllers/).
+Specially, validating admission controllers. At time of writing the
 [image policy webhook](https://kubernetes.io/docs/admin/admission-controllers/#imagepolicywebhook)
-can be supported.  An adapter must be used to convert the Webhook into an 
-answer API query and back.  
+can be supported.  An adapter must be used to convert the Webhook into an
+answer API query and back.
 
 The image policy Webhook creates a request that looks like this:
 
@@ -553,9 +581,9 @@ This can generate a possible mapping as follows:
     }
 
 ## SPIFFE ##
-SPIFFE defines a format for resource identification called the 
+SPIFFE defines a format for resource identification called the
 [SVID](https://github.com/spiffe/spiffe/blob/master/standards/SPIFFE-ID.md).
-SVIDs can be represented by a 
+SVIDs can be represented by a
 [x509 certrificate](https://github.com/spiffe/spiffe/blob/master/standards/X509-SVID.md).
 To use SVID with PADME the credential field is expanded as follows:
 
@@ -576,20 +604,20 @@ becomes
         // return the type of the credential
         getType() CredentialType
         // compare credentials
-        // return true if this credential accepts c1 as valid, 
+        // return true if this credential accepts c1 as valid,
         // false otherwise
         Accept(c1 *Credential) bool
     }
 
-In this circumstance, application calling Answer must provide as SPIFFE leaf 
+In this circumstance, application calling Answer must provide as SPIFFE leaf
 cert for its credential.  The policy is distributed with the SPIFFE Signing
-cert in its credential field. (Future implementations can optimize the 
-obvious duplication issues away).  Verification the proceeds as per 
-the SPIFFE documentation, by verifying the signature on the provided leaf 
-certificate.  
+cert in its credential field. (Future implementations can optimize the
+obvious duplication issues away).  Verification the proceeds as per
+the SPIFFE documentation, by verifying the signature on the provided leaf
+certificate.
 
-SPIFFE is agnostic to the meaning of the path (SPIFFE name) contained in an 
-SVID. At this juncture it is not clear what that meaning should be in a 
+SPIFFE is agnostic to the meaning of the path (SPIFFE name) contained in an
+SVID. At this juncture it is not clear what that meaning should be in a
 PADME context. As such PADME is agnostic on this subject.
 
 ## TBDs ##
